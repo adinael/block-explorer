@@ -3,7 +3,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 
 import { TranslateService } from '@ngx-translate/core';
 
-import { Transaction } from '../../models/transaction';
+import { Transaction, TransactionValue } from '../../models/transaction';
 
 import { ErrorService } from '../../services/error.service';
 import { NavigatorService } from '../../services/navigator.service';
@@ -38,10 +38,53 @@ export class TransactionDetailsComponent implements OnInit {
 
   private onTransactionRetrieved(response: Transaction) {
     this.transaction = response;
+    this.transaction.input = this.collapseRepeatedRows(this.transaction.input);
+    this.transaction.output = this.collapseRepeatedRows(this.transaction.output);
   }
 
   private onError(response: any) {
     this.errorService.renderServerErrors(null, response);
+  }
+
+  private collapseRepeatedRows(rows: TransactionValue[]): TransactionValue[] {
+    if (rows.length === 0) {
+      return rows;
+    }
+
+    rows = rows.sort((a, b) => {
+      return a.address < b.address ? -1 : 1;
+    });
+    const collapsedRows = [];
+    let accumulatedTransaction = new TransactionValue();
+    accumulatedTransaction.address = rows[ 0 ].address;
+    accumulatedTransaction.value = 0.00;
+    let countSameAddress = 0;
+
+    rows.forEach((row) => {
+      const aNewAddressTransaction = row.address !== accumulatedTransaction.address;
+
+      if (aNewAddressTransaction) {
+        this.pushAccumulatedTransaction(collapsedRows, accumulatedTransaction, countSameAddress);
+
+        accumulatedTransaction = new TransactionValue();
+        accumulatedTransaction.address = row.address;
+        accumulatedTransaction.value = 0.00;
+      }
+
+      countSameAddress = aNewAddressTransaction ? 1 : countSameAddress + 1;
+      accumulatedTransaction.value += row.value;
+    });
+    this.pushAccumulatedTransaction(collapsedRows, accumulatedTransaction, countSameAddress);
+
+    return collapsedRows;
+  }
+
+  private pushAccumulatedTransaction(collapsedRows: TransactionValue[], collapsedRow: TransactionValue, count: number): void {
+    if (count > 1) {
+      collapsedRow.address += ` (${ count })`;
+    }
+
+    collapsedRows.push(collapsedRow);
   }
 
   getFee(tx: Transaction): number {
