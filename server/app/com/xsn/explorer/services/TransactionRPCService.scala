@@ -4,7 +4,7 @@ import com.alexitc.playsonify.core.FutureOr.Implicits.{FutureListOps, FutureOps,
 import com.alexitc.playsonify.core.{FutureApplicationResult, FutureOr}
 import com.xsn.explorer.errors.{InvalidRawTransactionError, TransactionFormatError, TransactionNotFoundError, XSNWorkQueueDepthExceeded}
 import com.xsn.explorer.models.rpc.TransactionVIN
-import com.xsn.explorer.models.{HexString, Transaction, TransactionDetails, TransactionId, TransactionValue}
+import com.xsn.explorer.models.{HexString, Transaction, TransactionDetails, TransactionId, TransactionValue, rpc}
 import com.xsn.explorer.util.Extensions.FutureOrExt
 import javax.inject.Inject
 import org.scalactic.{Bad, Good, One, Or}
@@ -91,6 +91,74 @@ class TransactionRPCService @Inject() (
           case NonFatal(ex) =>
             logger.warn(s"Failed to load VIN, trying sequentially, error = ${ex.getMessage}")
             loadVINSequentially(list).toFuture
+        }
+  }
+
+  /**
+   * Get transactions without loading its input values
+   */
+  def getPlainTransactions(ids: List[TransactionId]): FutureApplicationResult[List[rpc.Transaction]] = {
+    def getPlainTransaction(id: TransactionId) = {
+      xsnService.getTransaction(id)
+    }
+
+    def loadTransactionsSlowly(pending: List[TransactionId]): FutureOr[List[rpc.Transaction]] = pending match {
+      case x :: xs =>
+        for {
+          tx <- getPlainTransaction(x).toFutureOr
+          next <- loadTransactionsSlowly(xs)
+        } yield tx :: next
+
+      case _ => Future.successful(Good(List.empty)).toFutureOr
+    }
+
+    ids
+        .map(getPlainTransaction)
+        .toFutureOr
+        .recoverWith(XSNWorkQueueDepthExceeded) {
+          logger.warn("Unable to load transaction due to server overload, loading them slowly")
+          loadTransactionsSlowly(ids)
+        }
+        .toFuture
+        .recoverWith {
+          case NonFatal(ex) =>
+            logger.warn(s"Unable to load transactions due to server error, loading them sequentially, error = ${ex.getMessage}")
+            loadTransactionsSlowly(ids).toFuture
+        }
+  }
+
+  private def fromPlainTransaction(plainTransaction: rpc.Transaction): FutureApplicationResult[Transaction] = {
+    val result = for {
+      transactionVIN <- getTransactionVIN(plainTransaction.vin).toFutureOr
+      rpcTransaction = plainTransaction.copy(vin = transactionVIN)
+    } yield Transaction.fromRPC(rpcTransaction)
+
+    result.toFuture
+  }
+
+  def fromPlainTransactions(plainTransactions: List[rpc.Transaction]): FutureApplicationResult[List[Transaction]] = {
+    def loadTransactionsSlowly(pending: List[rpc.Transaction]): FutureOr[List[Transaction]] = pending match {
+      case x :: xs =>
+        for {
+          tx <- fromPlainTransaction(x).toFutureOr
+          next <- loadTransactionsSlowly(xs)
+        } yield tx :: next
+
+      case _ => Future.successful(Good(List.empty)).toFutureOr
+    }
+
+    plainTransactions
+        .map(fromPlainTransaction)
+        .toFutureOr
+        .recoverWith(XSNWorkQueueDepthExceeded) {
+          logger.warn("Unable to load transaction due to server overload, loading them slowly")
+          loadTransactionsSlowly(plainTransactions)
+        }
+        .toFuture
+        .recoverWith {
+          case NonFatal(ex) =>
+            logger.warn(s"Unable to load transactions due to server error, loading them sequentially, error = ${ex.getMessage}")
+            loadTransactionsSlowly(plainTransactions).toFuture
         }
   }
 

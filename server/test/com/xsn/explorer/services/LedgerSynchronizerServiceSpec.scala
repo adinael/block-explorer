@@ -1,7 +1,6 @@
 package com.xsn.explorer.services
 
 import com.alexitc.playsonify.core.FutureApplicationResult
-import com.alexitc.playsonify.validators.PaginatedQueryValidator
 import com.xsn.explorer.data.async.{BlockFutureDataHandler, LedgerFutureDataHandler, TransactionFutureDataHandler}
 import com.xsn.explorer.data.common.PostgresDataHandlerSpec
 import com.xsn.explorer.errors.BlockNotFoundError
@@ -9,7 +8,6 @@ import com.xsn.explorer.helpers.DataHandlerObjects._
 import com.xsn.explorer.helpers._
 import com.xsn.explorer.models.rpc.Block
 import com.xsn.explorer.models.{Blockhash, Height}
-import com.xsn.explorer.parsers.TransactionOrderingParser
 import org.scalactic.{Bad, Good, One, Or}
 import org.scalatest.BeforeAndAfter
 import org.scalatest.concurrent.ScalaFutures
@@ -218,17 +216,12 @@ class LedgerSynchronizerServiceSpec extends PostgresDataHandlerSpec with BeforeA
   }
 
   private def ledgerSynchronizerService(xsnService: XSNService): LedgerSynchronizerService = {
-    val transactionService = new TransactionService(
-      new PaginatedQueryValidator,
-      new TransactionOrderingParser,
-      new TransactionFutureDataHandler(transactionDataHandler)(Executors.databaseEC))
-
     val transactionRPCService = new TransactionRPCService(xsnService)
     new LedgerSynchronizerService(
       xsnService,
-      transactionService,
       transactionRPCService,
       new LedgerFutureDataHandler(dataHandler)(Executors.databaseEC),
-      new BlockFutureDataHandler(blockDataHandler)(Executors.databaseEC))
+      new BlockFutureDataHandler(blockDataHandler)(Executors.databaseEC),
+      new TransactionFutureDataHandler(transactionDataHandler)(Executors.databaseEC))
   }
 }

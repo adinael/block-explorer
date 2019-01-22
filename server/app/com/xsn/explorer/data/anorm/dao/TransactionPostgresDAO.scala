@@ -33,6 +33,9 @@ class TransactionPostgresDAO @Inject() (
     } yield partialTx.copy(inputs = transaction.inputs, outputs = transaction.outputs)
   }
 
+  /**
+   * The result must have transaction with cached input values
+   */
   def insert(transactions: List[Transaction])(implicit conn: Connection): Option[List[Transaction]] = {
     for {
       r <- batchInsert(transactions)

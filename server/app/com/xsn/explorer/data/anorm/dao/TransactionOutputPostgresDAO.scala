@@ -95,6 +95,20 @@ class TransactionOutputPostgresDAO {
     ).as(parseTransactionOutput.*).flatten
   }
 
+  def getOutput(txid: TransactionId, index: Int)(implicit conn: Connection): Option[Transaction.Output] = {
+    SQL(
+      """
+        |SELECT txid, index, hex_script, value, address, tpos_owner_address, tpos_merchant_address
+        |FROM transaction_outputs
+        |WHERE txid = {txid} AND
+        |      index = {index}
+      """.stripMargin
+    ).on(
+      'txid -> txid.string,
+      'index -> index
+    ).as(parseTransactionOutput.singleOpt).flatten
+  }
+
   def batchSpend(txid: TransactionId, inputs: List[Transaction.Input])(implicit conn: Connection): Option[Unit] = {
     inputs match {
       case Nil => Option(())

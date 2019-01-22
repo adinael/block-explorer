@@ -1,11 +1,11 @@
 package com.xsn.explorer.services
 
 import com.alexitc.playsonify.core.FutureApplicationResult
-import com.alexitc.playsonify.core.FutureOr.Implicits.{FutureOps, OptionOps}
-import com.xsn.explorer.data.async.{BlockFutureDataHandler, LedgerFutureDataHandler}
-import com.xsn.explorer.errors.BlockNotFoundError
+import com.alexitc.playsonify.core.FutureOr.Implicits.{FutureListOps, FutureOps, OptionOps}
+import com.xsn.explorer.data.async.{BlockFutureDataHandler, LedgerFutureDataHandler, TransactionFutureDataHandler}
+import com.xsn.explorer.errors.{BlockNotFoundError, TransactionNotFoundError}
 import com.xsn.explorer.models.rpc.Block
-import com.xsn.explorer.models.{Blockhash, Height, Transaction}
+import com.xsn.explorer.models.{Blockhash, Height, Transaction, rpc}
 import com.xsn.explorer.util.Extensions.FutureOrExt
 import javax.inject.Inject
 import org.scalactic.Good
@@ -15,10 +15,10 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class LedgerSynchronizerService @Inject() (
     xsnService: XSNService,
-    transactionService: TransactionService,
     transactionRPCService: TransactionRPCService,
     ledgerDataHandler: LedgerFutureDataHandler,
-    blockDataHandler: BlockFutureDataHandler)(
+    blockDataHandler: BlockFutureDataHandler,
+    transactionDataHandler: TransactionFutureDataHandler)(
     implicit ec: ExecutionContext) {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -161,12 +161,51 @@ class LedgerSynchronizerService @Inject() (
     val start = System.currentTimeMillis()
     val result = for {
       block <- xsnService.getBlock(blockhash).toFutureOr
-      transactions <- transactionRPCService.getTransactions(block.transactions).toFutureOr
+      plainTransactions <- transactionRPCService.getPlainTransactions(block.transactions).toFutureOr
       took = System.currentTimeMillis() - start
       _ = logger.info(s"Retrieving block = $blockhash, took $took ms")
+
+      transactions <- fromPlainTransactions(plainTransactions)
+          .toFutureOr
+          .map { x =>
+            logger.info(s"Retrieving inputs for block = $blockhash, took ${System.currentTimeMillis() - start - took} ms")
+            x
+          }
+          .recoverWith(TransactionNotFoundError) {
+            logger.info("Inputs weren't found on the db, trying xsn")
+            transactionRPCService
+                .fromPlainTransactions(plainTransactions)
+                .toFutureOr
+          }
     } yield (block, transactions)
 
     result.toFuture
+  }
+
+  private def fromPlainTransaction(tx: rpc.Transaction) = {
+    val newVIN = tx
+        .vin
+        .map { input =>
+          transactionDataHandler
+              .getOutput(input.txid, input.voutIndex)
+              .toFutureOr
+              .map { output =>
+                input.copy(value = Option(output.value), address = Option(output.address))
+              }
+              .toFuture
+        }
+
+    newVIN
+        .toFutureOr
+        .map { vin => Transaction.fromRPC(tx.copy(vin = vin)) }
+        .toFuture
+  }
+
+  private def fromPlainTransactions(transactions: List[rpc.Transaction]) = {
+    transactions
+        .map(fromPlainTransaction)
+        .toFutureOr
+        .toFuture
   }
 
   /**

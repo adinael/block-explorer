@@ -52,4 +52,8 @@ class TransactionFutureDataHandler @Inject() (
 
     blockingDataHandler.getByBlockhash(blockhash, limit, lastSeenTxid)
   }
+
+  override def getOutput(txid: TransactionId, index: Int): FutureApplicationResult[Transaction.Output] = Future {
+    blockingDataHandler.getOutput(txid, index)
+  }
 }

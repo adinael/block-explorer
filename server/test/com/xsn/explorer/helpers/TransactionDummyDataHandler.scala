@@ -20,4 +20,5 @@ class TransactionDummyDataHandler extends TransactionBlockingDataHandler {
 
   override def getByBlockhash(blockhash: Blockhash, limit: pagination.Limit, lastSeenTxid: Option[TransactionId]): ApplicationResult[List[TransactionWithValues]] = ???
 
+  override def getOutput(txid: TransactionId, index: Int): ApplicationResult[Transaction.Output] = ???
 }
